@@ -1,6 +1,6 @@
 ---
 title: "Bioinformatics in R. Lab 2: Data Visualization and GO analysis"
-author: "J. Cesar Ignacio Espinoza - Cesar   "
+author: "J. Cesar Ignacio Espinoza - Cesar, filled in by Danya Hassan   "
 date: "Week 03: April 1st and 3rd 2024"
 output: 
   html_document: 
