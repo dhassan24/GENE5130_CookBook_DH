@@ -1,0 +1,365 @@
+---
+title: "Bioinformatics in R. Lab 1: dplyr and ggplot"
+author: "J. Cesar Ignacio Espinoza - Cesar - FILLED IN BY DANYA HASSAN  "
+date: "Week 01: March 18 and 20, 2024"
+output: 
+  html_document: 
+    highlight: espresso
+    theme: cerulean
+---
+
+## NOTES
+
+Sequencing RNA because it is most likely to represent what is turning into a protein.
+
+It is also the easiest direct readout of expression of different genes (proteomics is more difficult),
+
+RNA-seq is what we will mostly be using in this class. It can represent coding RNA, non-coding RNA, and all actively transcribed RNA
+
+There are different permutations on selection: maybe just poly adenylated RNAs, rRNAs, cDNAs. We would find many rRNAs because those are the most abundant RNAs in the genome. SEQUENCING RNA READS AND MAPPING AGAINST REFERENCE GENOME
+
+-   General challenges: sample heterogeneity, alternative splicing, orders of magnitude range of gene expression, RNAs are heterogeneous macromolecules (different types needs different approaches), and RNA is fragile
+-   Genral method: Get RNA, map against reference genome or transcriptome or assemble a de novo read, and then analyze your reads
+-   RPKM: reads per kilobase of transcript per million mapped reads
+-   FPKM: fragments per kilobase of transcript per million mapped reads
+
+In RNA-seq, proportion of expression of a transcript is proportional to the number of cDNA fragments
+
+-   So larger genes will have more mapped RNA-seq reads and deeper sequencing libraries will have more counts per gene
+-   Rescale your original RPMs by divding them by the total of each rep, then divide each of them by the gene size
+
+With TPM (transcript per kilbase million): so divide by gene length first and then sequencing depth (total of each column)
+
+-   TPM adds to 10 in each oclumn, so you can compare everything to everything (unlike the RPKM one)
+
+## Introduction to dplyr
+
+**dplyr** is a powerful package in R for data manipulation. It provides a set of functions that are particularly useful for data wrangling tasks.
+
+In this tutorial, we'll cover some of the basic functions in dplyr and how to use them for common data manipulation tasks. Since this is a bioinformatics class the dataset will be RNA-seq FPKM table.
+
+**Test yourself!!!** Before continuing self test and make sure you can identify the differences between, *FPKM, TPM, RPKM*.
+
+### Loading the libraries and data.
+
+We will be using the data from :\
+*Zhang Y, Tong GH, Wei XX, Chen HY et al. Identification of Five Cytotoxicity-Related Genes Involved in the Progression of Triple-Negative Breast Cancer. Front Genet 2021;12:723477.*
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE, results="hide"}
+# We first need to import the important libnrary for today's class, dplyr
+library(dplyr)
+library(readr)
+data <- read.csv("~/KGI MSGDA/2024-2025/Spring 2025/R Bioinformatics/BreastCancerData-Class01.csv")
+```
+
+```{r}
+
+#This is a new code chunk
+
+```
+
+## Basic dplyr functions
+
+Take a look at your cheatsheet, and also look at the code below, play with these function for a few minutes to gain a sense of tidyverse, then continue with the exercise.
+
+```{r}
+#View dataset
+glimpse(mtcars)
+
+# Filter: cars with mpg > 20
+mtcars %>% 
+  filter(mpg > 20)
+
+# Select: just mpg, hp, and cyl
+mtcars %>% 
+  select(mpg, hp, cyl)
+
+# Mutate: new column kpl (kilometers per liter)
+mtcars %>% 
+  mutate(kpl = mpg * 0.425)
+
+# Arrange: order by horsepower
+mtcars %>% 
+  arrange(desc(hp))
+
+# Group & Summarise: average mpg by cyl
+mtcars %>%
+  group_by(cyl) %>%
+  summarise(avg_mpg = mean(mpg))
+```
+
+#### Piping
+
+If you took 5120 I hope you remember we covered piping **'\|'**, so the output of one function would be passed as the input for another function. here in dplyr piping uses a different operator **'%\>%'**
+
+In the code block below pipe the data frame into the base r function to get the names of the columns
+
+```{r}
+data %>%
+  colnames()
+```
+
+Create more code boxes (formally known as chunks) to inspect the dataset, try the following commands, head(), tail(), glimpse(), str(), summary(). Write in a sentence or two what they are appear to be doing. You can also look at the documentation.
+
+```{r}
+data %>%
+  head(20)
+```
+
+```{r}
+data %>%
+  tail(5)
+```
+
+```{r}
+data %>%
+  glimpse()
+```
+
+```{r}
+data %>%
+  head(20)
+```
+
+```{r}
+data %>%
+  dim()
+
+#This gives the number of columns and then the number of rows
+```
+
+```{r}
+data %>%
+  summary()
+
+#This gives the basic statistics of each column, such as class, min, max, median, mean, etc...
+```
+
+### Selecting columns.
+
+The **select()** function is used to select columns from a dataframe. You can specify the columns you want to keep using column names. In the code chunk below select gene, Samples and FPKM, save the subsetted dataframe as subset
+
+```{r}
+subset <- data %>% ### Modify this code block by usung the fucntion select
+  select(gene, Samples, FPKM)
+  
+head(subset, 10)
+```
+
+**Test yourself!!** What do you think happens when you use a negative sign '-' in front of the column name, Try i. \### That will tell R to exclude that column
+
+```{r}
+test_exclusion <- data %>%
+  select(-gene, -tissue.ch1)
+
+test_exclusion
+```
+
+### Filtering rows.
+
+The **filter()** function is used to filter rows based on conditions. You can filter rows from a dataset using logical operators, like =, \> or \<. If you are comparing strings you need to pass the argument as surronded by quotation marks. For example : **filter(col_1 == 'string')**
+
+```{r}
+metastasis <- data %>% ### Modify this code chunk to generate two dataframes based on the metastasis state of the Sample
+  filter(metastasis.ch1 == "yes")
+
+no_metastasis <- data %>%
+  filter(metastasis.ch1 == "no")
+```
+
+We spent a lot of time in lecture explaing what RNAseq and FPKM is lets use these data. Subset the dataframe to include only genes with more 200 FPKM as value and are from not cancerous tissue. Get the dimensions of this new dataframe to a new variable called size_not_cancer_abundant and view it. NOTE: not cancer is stored under *characteristics_ch1* and the value associated to not cancer is *tissue: normal breast tissue*
+
+```{r}
+subset_normal_fpkm <- data %>% ### Modify this code block
+  filter(characteristics_ch1 == "tissue: normal breast tissue", FPKM > 200)
+
+head(subset_normal_fpkm, 15)
+```
+
+Select the expression of the following genes `BRCA1`, `BRCA2`. and view it
+
+```{r}
+### Write your code here
+data %>%
+  filter(gene %in% c("BRCA1", "BRCA2")) %>%
+  select(gene, FPKM)
+```
+
+### Summarizing Data
+
+The **summarize()** function is used to summarize data, typically by calculating summary statistics. Common operators are mean(), max(), median, sum(), sd(), IQ(). **Try a few!**
+
+```{r}
+data %>%
+  summarize(average_exp = mean(FPKM))
+```
+
+You can pass summarize after another function, remember to use the pipe operator, in the code below calculate the mean FPKM for BRCA1.
+
+```{r}
+data %>% ### pipe your commands here
+  filter(gene == "BRCA1") %>%
+  summarize(average_exp_BRCA1 = mean(FPKM))
+```
+
+### Grouping data
+
+Another fan favorite from 5120. The **group_by()** function is used to group data by one or more variables. Naturally it is particularly helpful if we use it in combination with other functions. See
+
+```{r}
+data %>%
+  filter( gene == 'BRCA1') %>%
+  group_by(metastasis.ch1) %>%
+  summarize(avg = mean(FPKM))
+```
+
+In the code block below, select BRCA1 and BRCA1, calculate the average expression per gene, per tissue per metastasis state.
+
+```{r}
+ #### Write your code here
+data %>%
+  filter(gene %in% c('BRCA1', 'BRCA2')) %>%
+  group_by(gene, tissue.ch1, metastasis.ch1) %>%
+  summarize(avg_expresion_brcas = mean(FPKM))
+```
+
+### Renaming and changing values in a dataframe
+
+To rename columns in a dataframe using dplyr, you can use the **rename()** function. In the code block below, modify rename the columns: metastasis, tissue and characteristics to something more intuitive. Name the new df as renamed and view it. Also identify and drop unnecessary columns.
+
+
+```{r}
+renamed_df <- data %>%
+    rename('Metastatic State' = metastasis.ch1,
+           'Tissue Type' = tissue.ch1, 
+           'Tissue Characteristic' = characteristics_ch1)
+
+renamed_df
+
+```
+
+#### Additional excercises:
+
+1.- Multicondition filtering, filter for genes that `FPKM > 500`, Are from a cancerous tissue and are from samples with metastais.
+
+```{r}
+head(data)
+```
+
+``` {r}        
+### HINT : use multiple conditions in filter()
+
+multiconditional_test <- data %>%
+  filter(FPKM > 500, metastasis.ch1 == "yes", characteristics_ch1 == "tissue: breast tumor")
+
+multiconditional_test
+
+```
+
+2.- Top expressed genes: Find the tops 10 most highly expressed genes in normal breast tissue.
+
+```{r}         
+top_ten_genes <- data %>% ### HINT : filter() + arrange() + head()
+  filter(tissue.ch1 == "normal breast tissue") %>%
+  group_by(gene) %>%
+  summarise(avg_expr = mean(FPKM)) %>%
+  arrange(desc(avg_expr)) %>%
+  head(10)
+
+top_ten_genes
+```
+
+
+3.- Expression Ratio. Create a new column, that calculates the ratio of FPMK / max(FPKM) for each gene in the dataset (relative expression)
+
+```{r}         
+fpkm_ratio <- data %>% ### HINT: mutate() + max()
+  mutate("FPMK RATIO" = (FPKM/max(FPKM)))
+
+fpkm_ratio
+```
+
+## Introduction to ggplot
+
+**Test yourself** Before going forward try to see if you remember what gg stands for and what are the three basic components of a plot
+
+In this dataset we will continue exploring the same dataset as thre TNBC as above. First we load the libraries.
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE, results="hide"}
+# We first need to import the libraries 
+library(tidyverse)
+library(ggplot2)
+
+```
+
+Before diving into plotting lets remember what components of the plot
+
+##### **ggplot(data, aes(x = variable1, y =variable2 )) + geom() + ... + ... +**
+
+#### Bar Plot
+
+```{r}
+subset <- data %>%
+  filter(gene == 'BRCA1')
+
+ggplot(subset, aes(x= subset$Samples, y = subset$FPKM, fill = subset$metastasis.ch1)) + geom_col() 
+
+```
+
+In the example above note how we are using base R to link the specific column using the dolar sign, we can use %\>% operator one more time to pass a dataframe as the source of data for our ggplot figures.
+
+```{R}
+data_plot <- data %>%
+  filter(gene == 'BRCA1')
+
+data_plot
+
+ggplot(data_plot, aes(x= Samples, y = FPKM, fill = metastasis.ch1)) + geom_col() 
+
+```
+
+We can pass the data frame as the data for our ggplot object
+
+```{r}
+ggplot(data_plot, aes(x=Samples, y = FPKM)) + 
+  geom_col() + 
+  aes(fill = tissue.ch1) 
+
+```
+
+#### Density plots
+
+In the example below pass x= as FPKM, a the aestethics of a ggplot object, base the fill on the tissue type.
+
+```{r}
+
+ggplot(data_plot, aes(x=FPKM, fill = tissue.ch1)) + geom_density(aes(alpha = 0.5)) 
+```
+
+#### Box Plots
+
+```{r}
+data %>%
+  filter(gene == 'BRCA2') %>%
+  ggplot(., aes(x=metastasis.ch1, y = FPKM)) + geom_boxplot()
+```
+
+#### Scatter Plots
+
+```{r}
+two_genes <- data %>%
+  filter(gene == 'BRCA1' | gene == 'BRCA2') %>%
+  spread(key = gene, value = FPKM)
+
+ggplot(two_genes, aes(x=BRCA1, y=BRCA2)) +geom_point() + geom_smooth()
+
+```
+
+#### HeatMap
+
+```{r} 
+gene_set <- data %>% 
+  filter(gene == 'BRCA1'| gene == 'BRCA2' | gene == 'ALK' | gene == 'MYCN' | gene == 'TP53')
+
+ggplot(gene_set, aes(x=Samples, y=gene, fill = FPKM)) + geom_tile()
+```
