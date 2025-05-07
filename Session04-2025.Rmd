@@ -1,0 +1,602 @@
+---
+title: "Bioinformatics in R WGCNA"
+author: "J. Cesar Ignacio Espinoza - Cesar   "
+date: "Week 05: April 21th and 23rd 2025"
+output: 
+  html_document: 
+    highlight: espresso
+    theme: cerulean
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+### This class will incorporate a bit of ML.
+
+We will be performing a WGNCA, before proceeding test yourself and make
+sure you understand what weighted. Gene_network and correlation mean?
+
+## The dataset.
+
+we will be working with the dataset " Systems biological assessment of
+immunity to severe and mild COVID-19 infections"
+
+RNAseq analysis of PBMCs in a group of 17 COVID-19 subjects and 17
+healthy controls "
+
+```{r setup}
+    ### Edit this line so your notebook renders properly
+    knitr::opts_knit$set(root.dir = normalizePath("~/Bioinformatics_In_R/Week05/Session04-2025.Rmd")) 
+```
+
+We will be using the package called WGCNA, if you do not have it
+install, please run this cell, once it is installed comment it!
+
+```{r}
+#if (!require("BiocManager", quietly = TRUE))
+    #install.packages("BiocManager")
+#BiocManager::install("WGCNA")
+```
+
+We now load the libraries
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE, results="hide"}
+# We first need to import the important libnrary for today's class, dplyr
+library(WGCNA)
+library(dplyr)
+library(readr)
+library(DESeq2)
+library(ggplot2)
+```
+
+Load the data (Counts table and metadata from canvas site)
+
+```{r}
+### Run this chunk to import the counts table and metadata into your evironment.
+counts <- read.csv('~/Bioinformatics_In_R/Week05/GSE152418RawCounts.csv', header = TRUE, row.names = 1)
+metadata_again <- read.csv('~/Bioinformatics_In_R/Week05/GSE152418Metadata.csv', header = TRUE, row.names = 1)
+
+```
+
+```{r}
+head(counts)
+```
+
+```{r}
+head(metadata_again)
+```
+
+### QC:
+
+Here we wanna explore to see if the dataset that we have is good for
+analysis We are going to use a function called goodSamplesGenes(). Use
+the cell below to display the help page of this function, figure out if
+you can run it, look at the vignette and identify what this function is
+doing.
+
+```{r}
+?goodSamplesGenes()
+
+```
+
+```{r}
+### It look at the boolean list, and use it to subset your dataset
+
+?t
+transposed_counts <- t(counts)
+#Originally, the genes were rows and the samples were the columns
+#Now we can get the genes as columns and samples as rows (correct parameter)
+
+gsg_genes <- gsG$goodGenes
+gsg_samples <- gsG$goodSamples
+```
+
+Subset your data so only the genes that passed the filter are kept
+
+```{r}
+#base r
+
+subset_counts_genes <- counts[gsg_genes, ]
+subset_counts_genes
+
+#Because gsG is just a vector, we need to subset the gsG part for the GOOD GENES
+
+?subset
+
+### dplyr
+good_counts <- counts %>%
+  filter(gsg_genes)
+
+
+good_counts
+```
+
+#### Quick lecture 5 mins
+
+#Sidequest 20 mins:
+
+```{r}
+# Run this cell as it is, it is generatig artificial data 
+set.seed(123)
+group1 <- matrix(rnorm(40, mean = 0), ncol = 2)
+group2 <- matrix(rnorm(40, mean = 2.5), ncol = 2)
+group3 <- matrix(rnorm(40, mean = 8), ncol = 2)
+
+#sends to dataframe
+data <- rbind(group1, group2, group3)
+rownames(data) <- paste0("P", 1:nrow(data))
+data
+# Plot 
+df <- as.data.frame(data)
+colnames(df) <- c("x", "y")
+ggplot(df, aes(x, y)) + 
+  geom_point() + 
+  theme_minimal()
+
+df
+```
+
+Lookup the hclust function and perform clustering the data, try
+different distance methods and agglomeration methods.
+
+```{r}
+### Try different distances and methods
+?hclust
+?dist
+
+d <- dist(df, method = "maximum")
+```
+
+How do the shapes of the deprograms differ?
+
+Which method best recovers the intuitive groupings from the 2D plot?
+
+When might you prefer a chaining method like "single" vs. compact (the
+algorithm reduces the variance within created cluster) like "ward.D2"?
+
+```{r}
+#### Run this cell as it just plots your points beased on the create clusters
+cut_and_color <- function(method, k = 3) {
+  hc <- hclust(d, method = method)
+  clusters <- cutree(hc, k = k)
+  df$cluster <- as.factor(clusters)
+  
+  ggplot(df, aes(x, y, color = cluster)) + 
+    geom_point(size = 3) +
+    labs(title = paste("Clusters with", method, "linkage")) +
+    theme_minimal()
+}
+```
+
+```{r}
+### Run our custom fucntion here, try different agglomaeration methods, and distance
+
+cut_and_color("single")
+```
+
+```{r}
+methods <- c('single', 'complete', 'average', 'ward.D2')
+
+par(mfrow = c(2,2))
+for (m in methods) {
+  hc <- hclust (d, method = m)
+  plot(hc, main = paste("Method:", m))
+}
+```
+
+#Discuss:
+
+How could this apply to real biological data (e.g., gene expression
+clustering)?
+
+## Back to our main topic
+
+Perform clustering on our data **HINT!!!** Double check that columns and
+rows are as the program expects them!
+
+A good way to detect outliers is to perform hierarchical clustering of
+all the samples. If you do that you should be able to see if some data
+points are too far from the rest of the samples.
+
+```{r}
+#### Perform CLustering, plot it! WHich samples would you remove?
+### Int you can use the base R plot function on the object resulting from clustering
+
+df
+subset_counts_genes
+
+subset_dist <- dist(subset_counts_genes, method = "maximum")
+
+#Can also do temptree <- hclust(dist(t(goodSamplesGenes(counts))), method = "eucledian")
+
+cut_and_color_subset <- function(method, k = 3) {
+  hc <- hclust(subset_dist, method = method)
+  clusters <- cutree(hc, k = k)
+  df$cluster <- as.factor(clusters)
+  
+  ggplot(df, aes(x, y, color = cluster)) + 
+    geom_point(size = 3) +
+    labs(title = paste("Clusters with", method, "linkage")) +
+    theme_minimal()
+}
+
+```
+
+```{r}
+### Write your code here
+
+cut_and_color_subset("single")
+
+temptree <- hclust(dist(t(goodSamplesGenes(counts))), method = "euclidean")
+```
+
+Outliers are literally that samples taht are far from each other, we can
+also look at that by applying dimensionality reduction, one of the most
+common techniques is PCA. run the cell below to go to the help page for
+PCA
+
+```{r}
+?prcomp
+```
+
+```{r}
+pca_genes <- prcomp(transposed_counts, retx = TRUE)
+#rows are data and columns are dimension, when we transpose the columns become dimensions and rows become sample names
+```
+
+```{r}
+pca_genes$x
+pca_genes$x
+
+pca_df <- as.data.frame(pca_genes$x[, 1:34])
+pca_df$Gene <- row.names(pca_genes$x)
+
+ggplot(pca_df, aes(x = pca_df$PC1, y = PC2)) +
+  geom_point(alpha = 0.7) +
+  theme_minimal() + 
+  labs(title = "PCA plot between PC1 and PC2", x = "PC1", y = "PC2")
+
+pca_df
+```
+
+```{r}
+#Another way to do the plot, using plotly
+
+library(plotly)
+
+plot_ly(pca_df, x = ~PC1, y = ~PC2, z = ~PC3,
+        type = "scatter3d", mode = "markers",
+        text = ~Gene) %>%
+  layout(title = "PCA1 vs PCA2 vs PCA3")
+```
+
+**HINT** Use DPlyr
+
+```{r}
+### TO BE REMOVED
+
+pca_df_cleaned <- pca_df %>%
+  filter(PC1 < 250000, PC2 > -1e05)
+
+ggplot(pca_df_cleaned, aes(x = PC1, y = PC2)) +
+  geom_point(alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "Cleaned PCA1 vs PCA2")
+```
+
+```{r}
+plot_ly(pca_df_cleaned, x = ~PC1, y = ~PC2, z = ~PC3,
+        type = "scatter3d", mode = "markers", text = ~Gene) %>%
+  layout("PCA1 vs PCA2 vs PCA3")
+  
+```
+
+#Normalization.
+
+The 'easiest' way will be to run DESEq2 and use the normalized counts
+object from DESeq2, Look at your past notes and run it below. You have
+all you need but you might need to play with the metadata file. HINT :
+df[!(row.names(df) %in% row_names_df_to_remove),] \###
+
+# Filter the data to remove bad samples
+
+```{r}
+library(tibble)
+
+new_counts <- good_counts %>% 
+  tibble::rownames_to_column(var = "GeneID") %>%
+  dplyr::select(-GSM4615000, -GSM4614993, -GSM4614995)
+
+new_counts
+```
+
+```{r}
+metadata_transposed <- as.data.frame(t(metadata_again))
+
+metadata_new <- metadata_transposed %>%
+  dplyr::select(-GSM4615000, -GSM4614993, -GSM4614995)
+
+metadata_finalized <- t(metadata_new)
+
+metadata_finalized
+```
+
+```{r}
+
+### WRITE YOUR CODE HERE, ALSO RENAME THE COLUMNS OF METADATA SO IT IS EASIER TO READ, REMOVE 'DOTS'
+### AND RENAMED HEADERS HERE
+
+metadata_finalized_df <- as.data.frame(metadata_finalized)
+
+cleaned_metadata <- metadata_finalized_df %>%
+  dplyr::select(-geo_accession, -geographical.location.ch1) %>%
+  rename("Days_Post_Symp_Onset" = "days_post_symptom_onset.ch1",
+         "Disease" = "disease.state.ch1",
+         "Gender" = "gender.ch1",
+         "Severity" = "severity.ch1")
+
+cleaned_metadata
+```
+
+```{r}
+### RunDeseq2
+
+
+library(tibble)
+
+cleaned_metadata <- cleaned_metadata %>%
+  filter(Disease != "Convalescent")
+
+new_counts <- new_counts %>%
+  dplyr::select(-GSM4614985)
+
+#cleaned_metadata
+
+# Move GeneID column into rownames
+new_counts <- new_counts %>% 
+  column_to_rownames(var = "GeneID")
+
+library(DESeq2)
+dds_again <- DESeqDataSetFromMatrix(countData = new_counts,
+                              colData = cleaned_metadata,
+                              design = ~ Disease)
+
+#new_counts
+#GOT RID OF GSM4614985
+#NEED TO DO THE SAME IN NEW_COUNTS
+#dds_again
+```
+
+Now remove the genes with counts \< 15 in more than 75% of samples
+(31\*0.75 \~ 23) This number is coming from the WGCNA recommendations
+
+```{r}
+#dds75 <- dds[rowSums(counts(dds)) >= ]
+
+dds75 <- dds_again[(rowSums(counts(dds_again)) >= 23), ]
+dds75
+```
+
+```{r}
+dds_norm <- vst(dds75)    ### This applu=ies the normalization without running the whole DESEQ2 function
+
+norm_gene_exp <- t(assay(dds_norm)) ### WGCNA needs the data in a particular shape, make sure this matches it
+
+```
+
+```{r}
+
+```
+
+### Before proceeding with WGCNA, let's see if you are keeping a cookbook with R, make a vol cano plot, and a heatmap with the DSEQ data you just generated.
+
+```{r}
+#deseq_ob <- DESeq(dds75)
+#subset <-  dds[(rowSums(counts(dds)) >= 10),]
+
+#USING DDS75 NOW
+relevel(dds75$Disease, ref='Healthy')
+
+### Run deseq2
+
+deseq_ob <- DESeq(dds75)
+deseq_ob
+
+#### Save the results to a new object
+res <- results(deseq_ob, alpha = 0.05)
+
+res
+```
+
+```{r}
+### Print a volcano
+library("org.Hs.eg.db")
+sigs.df <-  as.data.frame(res) #Making the results into a dataframe
+sigs.df$symbol <- mapIds(org.Hs.eg.db, keys= rownames(sigs.df), keytype = 'ENSEMBL', colum = "SYMBOL") 
+
+sigs.df
+#THIS LAST LINE IS ACTUALLY MAKING A SYMBOL COLUMN WITH GENE NAMES
+```
+
+```{r}
+### Subset for a heatmap
+library(EnhancedVolcano)
+
+EnhancedVolcano(sigs.df,
+    lab = sigs.df$symbol,
+    x = 'log2FoldChange',
+    y = 'pvalue',
+    title = 'Test',
+    pCutoff = 10e-32,
+    FCcutoff = 0.5,
+    pointSize = 3.0,
+    labSize = 6.0)
+```
+
+```{r}
+### Print your heatmap
+library(ComplexHeatmap)
+library(tidyr)
+library(dplyr)
+sigs.df <- sigs.df %>%
+  filter(padj < 0.05, log2FoldChange > 1.5, baseMean > 100)
+
+sigs.df
+
+mat2 <- counts(deseq_ob, normalized = T)[rownames(sigs.df), ]
+
+mat.z2 <- t(apply(mat2, 1, scale))
+
+colnames(mat.z2) <- colnames(mat2)
+
+Heatmap(mat.z2, cluster_rows= T, cluster_columns= T, name = "Z-score", row_labels = sigs.df[rownames(mat.z2),]$symbol)
+
+#mat.z2
+```
+
+# We can finally start with our WGNCA data analysis
+
+First we pick up a soft threshold modify the power vector below
+
+```{r}
+sft <- pickSoftThreshold(norm_gene_exp, 
+                  powerVector = c(1:20), 
+                  networkType = "signed", 
+                  verbose = 2)
+
+#Soft threshold is when you have a counts table (which genes go up and down at the same time, in the same regulatory network)
+```
+
+You can acess the results with sft\$fitIndices. We are going to pick a
+power that gives us the higherst R2 and the lowest mean K.
+
+**HINT plot the data!** First plot Power vs r2
+
+```{r}
+ggplot(data = sft$fitIndices, aes(x = Power, y = SFT.R.sq)) + geom_point()
+```
+
+Then Plot Power vs mean.k
+
+```{r}
+### Follow the example above and plot meanK 
+ggplot(sft$fitIndices, aes(x = Power, y = mean.k., color = "seagreen")) +
+  geom_point()
+
+```
+
+After you pick up a threshold we are ready to run our data analysis
+
+While it runs take a look at the vignette
+(<https://www.rdocumentation.org/packages/WGCNA/versions/1.69/topics/blockwiseModules>)
+to learn about the parameters
+
+```{r}
+### Uncoment these cells if you get issues
+temp_cor <-  cor
+cor <- WGCNA::cor
+norm_gene_exp[] <- sapply(norm_gene_exp, as.numeric)
+### This is the mean meat and potatos function
+bwm <- blockwiseModules(norm_gene_exp, 
+                 maxBlockSize = 30000,
+                 TOMType = "signed",
+                 power = 15, 
+                 mergeCutHeight = 0.2, 
+                 numericLabels = FALSE, 
+                 randomSeed = 1234, 
+                 verbose = 2)
+
+?blockwiseModules
+
+```
+
+[\#](https://www.rdocumentation.org/packages/WGCNA/versions/1.69/topics/blockwiseModules)explore
+the bwm object, how many modules are there? What us the largest module?
+What is the smallest?
+
+```{r}
+## RUN THIS AS IS, IT WILL PLOT THE COLORS AND DENDROGRAM
+## https://www.rdocumentation.org/packages/WGCNA/versions/1.72-5/topics/plotDendroAndColors
+mergedColors = labels2colors(bwm$colors)
+plotDendroAndColors(
+  bwm$dendrograms[[1]],
+  mergedColors[bwm$blockGenes[[1]]],
+  "Module colors",
+  dendroLabels = FALSE,
+  hang = 0.03,
+  addGuide = TRUE,
+  guideHang = 0.05 )
+
+```
+
+# Now we can correlate our findings with phenotype states of patients
+
+Take a look at the phenotype table, we want to correlate these with our
+modules (groups of genes), "one-hot encoding", for example"
+
+```         
+labels <- c("A", "B", "C")
+
+# One-hot:
+A = [1 0 0]
+B = [0 1 0]
+C = [0 0 1]
+```
+
+###Remember that WCGNA is a way of clustering based on a SCALE FREE NETWORK, because this is the most representative of actual biology. There are nodes that reach out to other paths, and make their own clusters. WCGNA gives you colors as the clusters, and you can correlate these clusters as phenotypic traits. 
+
+```{r}
+### The easiest way is just to add a new column and subset it at the end, look at the example below, work your way and modify all the relevant traits
+traits <- metadata_finalized_df %>%
+  mutate(disease_state_bin = ifelse(grepl('COVID', disease.state.ch1),1,0)) %>%
+  mutate(moderate_bin = ifelse(grepl('Moderate', severity.ch1), 1,0)) %>%
+  mutate(moderate_bin = ifelse(grepl('ICU', severity.ch1), 1,0)) %>%
+  mutate(healthy_bin = ifelse(grepl('Health', severity.ch1), 1,0)) %>%
+  mutate(gender_bin = ifelse(grepl('M', gender.ch1), 1,0)) %>%
+  dplyr::select(8:11)
+  
+
+traits <- traits[-1, ]
+traits
+```
+
+```{r}
+#traits <- new_pheno %>%
+```
+
+```{r}
+correlations = cor(bwm$MEs, traits, use = 'p')
+```
+
+```{r}
+pvalues = corPvalueStudent()
+```
+
+```{r}
+## Visualiza our moduels as a heatmap
+library(ComplexHeatmap)
+Heatmap(correlations)
+```
+
+Pick up a few modules of interest
+
+```{r}
+## Extract the genenames of a module of interest run GSEA on it. 
+### HINTS: 
+labels2colors(bwm$colors)
+names(bwm$colors)
+
+### The easiest ways is to load thes two into  a DF and subset from there, but you can do it anyway.
+```
+
+```{r}
+### Run your GSEA here
+```
+
+```{r}
+### Run your GSEA here
+```
+
+```{r}
+### Run your GSEA here
+```
