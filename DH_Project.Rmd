@@ -1,0 +1,315 @@
+---
+output: 
+  pdf_document: default
+  html_document: default
+---
+
+## Danya Hassan
+
+## Bioinformatics in R Final Project Spring 2025
+
+##### This notebook is building off of the computational work conducted on google colab. In google colab we began with six FASTQ files, 3 of which came from human lung epithelial cells that were treated with t tenax protozoan and 3 of which were untreated and served as a control. I created a pipeline to generate SAM/BAM files for each FASTQ file, which was then used to create a GTF file and then a counts.txt file to capture the expression levels of each caputred ENSEMBLE gene for each sample.
+
+```{r}
+ ### Edit this line so your notebook renders properly
+    knitr::opts_knit$set(root.dir = normalizePath("C:/Users/skywr/Documents/KGI MSGDA/2024-2025/Spring 2025/R Bioinformatics/Project")) 
+
+#These two are needed to knit .Rmd to an HTML 
+#install.packages("tinytex")
+#tinytex::install_tinytex()
+
+```
+
+```{r}
+#if (!require("BiocManager", quietly = TRUE))
+    #install.packages("BiocManager")
+
+#BiocManager::install("DESeq2")
+#BiocManager::install("org.Hs.eg.db")
+#BiocManager::install("clusterProfiler")
+#BiocManager::install("EnhancedVolcano")
+#BiocManager::install("biomaRt")
+#BiocManager::install("ComplexHeatmap")
+```
+
+##### First we need to install the libraries for running this pipeline. If you have never installed the packages for these libraries you need to do so.
+
+```{r}
+# We first need to import the important the libraries for this project
+#install.packages("dplyr")
+#install.packages("readr")
+#install.packages("ggplot2")
+#install.packages("gprofiler2")
+#install.packages("circlize")  # lowercase package name on CRAN
+
+
+library(dplyr)
+library(readr)
+library(DESeq2)
+library(ggplot2)
+library(clusterProfiler)
+library("org.Hs.eg.db")
+library(gprofiler2)
+library(circlize)
+library(EnhancedVolcano)
+library(biomaRt)
+library(ComplexHeatmap)
+library(tibble)
+```
+
+##### Now we need to import the counts table from the Google colab Pipeline and the metadata table that I made .
+
+```{r}
+
+# Read tab-delimited text file
+counts <- read.delim("~/KGI MSGDA/2024-2025/Spring 2025/R Bioinformatics/Project/dh_counts_project.txt", comment.char="#", stringsAsFactors=TRUE, row.names = 1)
+
+metadata <- read.csv("~/KGI MSGDA/2024-2025/Spring 2025/R Bioinformatics/Project/dh_counts_project_metadata.csv")
+```
+
+##### Now we need to adjust the metadata table to make it acceptable for DESeq analysis and give some of the columns more accruate labels
+
+```{r}
+#Need to make a new data frame called sample_id, with just the IDs, treatment type, and celltype
+
+sample_info <- metadata %>%
+  dplyr::select(-geo_id) %>%
+  dplyr::rename(ttenax = dex)
+
+sample_info <- as.data.frame(sample_info)
+rownames(sample_info) <- sample_info$id
+
+sample_info <- sample_info %>%
+  dplyr::select(-id)
+
+sample_info
+```
+
+##### We need to drop a few of the columns of the counts table to get the columns to only represent each sample (rows will be the genes and their expression)
+
+
+```{r}
+counts_one <- counts %>%
+  dplyr::select(-c(Chr, Start, End, Strand, Length))
+
+#counts_one (To check we removed the columns properly)
+
+counts_one <- counts_one %>%
+  dplyr::rename(SRR23972383 = TT_Cultured_01.sam, SRR23972384 = TT_Cultured_02.sam,
+         SRR23972385 = TT_Cultured_03.sam, SRR23972386 = Untreated_01.sam,
+         SRR23972387 = Untreated_02.sam, SRR23972388 = Untreated_03.sam)  ##Renaming to the sample name, for consistency with the metadata
+ 
+counts_one
+```
+
+
+```{r}
+
+# RUN THIS IF YOU'RE GETTING AN ERROR IN THE DESeqDataSetFromMatrix STEP: 
+#setClassUnion("ExpData", c("matrix", "SummarizedExperiment"))
+
+dds <- DESeqDataSetFromMatrix(
+  countData = counts_one,
+  colData = sample_info,
+  design = ~ ttenax
+)
+
+dds
+#This code is doing the following: creating a DESeqDataSet object from our raw count matrix and sample metadata
+#Then counts is your matrix of RAW READ COUNTS
+#Each row = gene, each column = sample, INTEGERS
+#sample_info is a dataframe with metadata about each sample
+#design is the experimental design formula, where we are telling DESeq2 to model gene expression as a function of the variable ttenax exposure
+
+
+```
+
+##### Now we are going to perfrom the actual differential expression analysis function, first filtering the dds results to only have genes with more than 10 read counts. Now we need to relevel the dds results because DESeq2 needs a reference or baseline, which in this case will be the control group data. We will then extract the results of perform the differential expression analysis and extract the results using the results command.
+
+```{r}
+dds_filtered <- dds[rowSums(counts(dds)) > 10, ]
+
+dds_filtered$ttenax <- relevel(dds_filtered$ttenax, ref = "control")
+
+dds_seq_ttenax <- DESeq(dds_filtered)
+
+res <- results(dds_seq_ttenax, alpha = 0.05)
+
+res
+
+
+#The DESeq command tells R to perform the full differential expression analysis pipeline on our data-set (estimate size factors, estimate dispersion, fit negative binomial, fit a generalized linear model for each gene)
+
+#THE RESULTS COMMAND GIVES US LOG2FOLD CHANGE, LOG FOLD CHANGE STANDARD ERROR, PVALUE, AND ADJUSTED P VALUE
+
+
+```
+
+##### To start visual analysis of the treated and untreated samples, we will make a PCA plot to make sure that the treated and untreated samples are spatially segregated.
+
+```{r}
+#Let's make a PCA plot of the t tenax treated vs untreated samples
+
+counts_renamed <- counts_one %>%
+   dplyr::rename("T-Tenax Treated 1" = SRR23972383,
+         "T-Tenax Treated 2" = SRR23972384,
+         "T-Tenax Treated 3" = SRR23972385,
+         "Untreated 1" = SRR23972386,
+         "Untreated 2" = SRR23972387,
+         "Untreated 3" = SRR23972388)
+  
+transposed_counts <- t(counts_renamed)
+
+pca_genes <- prcomp(transposed_counts, retx = TRUE)
+
+pca_ttenax_df <- as.data.frame(pca_genes$x[, 1:6])
+pca_ttenax_df$Gene <- row.names(pca_genes$x)
+
+pca_ttenax_df$Condition <- ifelse(grepl("T-Tenax", pca_ttenax_df$Gene), "Treated", "Untreated")
+
+library(plotly)
+
+plot_ly(pca_ttenax_df, x= ~PC1, y = ~PC2, z = ~PC3,
+        type = "scatter3d", mode = "markers", color =  ~Condition, colors = c("Untreated" = "seagreen", "Treated" = "skyblue"), text = ~Gene) %>%
+  layout("PCA1 vs PCA2 vs PCA3")
+```
+
+##### To begin our gene ontology process we need to make a dataframe that holds the gene IDs from ENSEMBL, which will be used to label biological process, KEGG pathway, etc...
+
+```{r}
+sigs.df <-  as.data.frame(res) #Making the results into a dataframe
+sigs.df$symbol <- mapIds(org.Hs.eg.db, keys= rownames(sigs.df), keytype = 'ENSEMBL', colum = "SYMBOL") 
+```
+
+##### We are going to use the clusterprofile library to generate a KEGG pathway for just the upregulated genes in the data frame. We will not be generating one for the downregulated genes because ENSEMBL does not have enough data on their respective associated pathways.
+
+```{r}
+sigs_data_frame <- as.data.frame(sigs.df)
+
+sigs_data_frame_padj <- sigs_data_frame %>%
+  filter(padj < 0.05)
+
+sigs_data_frame_padj_upreg <- sigs_data_frame_padj %>%
+  filter(log2FoldChange > 1.0)
+
+sigs_data_frame_padj_dwreg <- sigs_data_frame_padj %>%
+  filter(log2FoldChange < -0.5)
+
+upreg_genes_to_test <- rownames(sigs_data_frame_padj_upreg)
+upreg_genes_to_test
+dwreg_genes_to_test <- rownames(sigs_data_frame_padj_dwreg)
+dwreg_genes_to_test
+#Making a KEGG signal patwhay analysis plot
+#TO RUN A KEGG ANALYSIS WE NEED TO CONVERT ENSEMBL IDS TO ENTREZID
+
+upreg_ensembl_to_entrezid <- bitr(upreg_genes_to_test, fromType = "ENSEMBL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+upreg_ensembl_to_entrezid
+
+dwreg_ensemble_to_entrezid <- bitr(dwreg_genes_to_test, fromType = "ENSEMBL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+dwreg_ensemble_to_entrezid
+sum(is.na(dwreg_ensemble_to_entrezid$ENTREZID))
+
+#Now we can run enrichKEGG()
+upreg_KEGG_genes_to_test <- upreg_ensembl_to_entrezid$ENTREZID
+dwreg_KEGG_genes_to_test <- dwreg_ensemble_to_entrezid$ENTREZID
+length(dwreg_KEGG_genes_to_test)
+
+upreg_KEGG_gene_ontology <- enrichKEGG(gene = upreg_KEGG_genes_to_test, organism  = "hsa", keyType = 'ncbi-geneid', pvalueCutoff = 0.05)
+
+#dwreg_KEGG_gene_ontology <- enrichKEGG(gene = dwreg_KEGG_genes_to_test, organism  = "hsa", keyType = 'ncbi-geneid', pvalueCutoff = 0.1, qvalueCutoff = 0.2)
+
+#Going to exclude the downregulated KEGG gene ontology because none of them are associated with a KEGG enrichment pathway 
+```
+
+##### Now we are going to take the KEGG Pathway matrix to create a dotplot figure of the upregulated gene pathways associated with T. Tenax exposure in NCI-H292 cells.
+
+```{r}
+dotplot(upreg_KEGG_gene_ontology, showCategory = 15, title = "KEGG Enrichment Pathway of Upregulated Genes")
+```
+
+##### Next is to make a gene ontology plot of the upregulated genes in the form of a bar plot, to capture the biological processes
+
+```{r}
+sigs_data_frame_padj_upreg_cleaned <- sigs_data_frame_padj_upreg %>%
+  filter(baseMean > 100)
+
+upreg_G0_genes_to_test <- rownames(sigs_data_frame_padj_upreg_cleaned)
+
+upreg_GO_results <- enrichGO(gene = upreg_G0_genes_to_test, OrgDb = "org.Hs.eg.db", keyType = 'ENSEMBL', ont = "BP") #BP stands for biological processes
+upreg_gene_ontology_plot <- barplot(upreg_GO_results, showCategory = 10) + 
+  ggtitle("Gene Ontology of Upregulated Genes in T-Tenax Treated NCI-H292 cells Cells") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+upreg_gene_ontology_plot
+```
+
+##### Now we are going to make a GOST plot of the upregulated genes
+
+```{r}
+#Let's try the GOST program now, using gprofiler2 
+#To look at the UPREGULATED genes first
+sigs_data_frame_upreg_genes <- sigs_data_frame_padj %>%
+  filter(log2FoldChange > 1.5, baseMean > 100)
+
+upreg_sig_genes <- rownames(sigs_data_frame_upreg_genes)
+gost_plot_data <- gost(upreg_sig_genes, organism = 'hsapiens', significant = T)
+
+upreg_genes_gostplot <- gostplot(gost_plot_data, capped = TRUE, interactive = T)
+
+upreg_genes_gostplot
+```
+
+##### GOST Plot for the downreulgated genes, luckily there is enough data available for these genes
+
+```{r}
+#Now let's do the same thing, but for the DOWNREGULATED GENES
+sigs_data_frame_downreg_genes <- sigs_data_frame_padj %>%
+  filter(log2FoldChange < -1.0, baseMean > 100)
+
+downreg_sig_genes <- rownames(sigs_data_frame_downreg_genes)
+
+gost_downreg_plot_data <- gost(downreg_sig_genes, organism = 'hsapiens', significant = T)
+gostplot(gost_downreg_plot_data, interactive = T)
+```
+
+##### Now to tie it all together, let's make a heatmap of some of significantly differentially expressed genes from the differential expression analysis.
+
+```{r}
+#Now let's make a heatmap of the changes in differential gene expression, among the treated and untreated cultures
+sig_df_padj_cleaned <- sigs_data_frame_padj %>%
+  filter(baseMean > 220, abs(log2FoldChange) > 1.3)
+
+heatmap_counts <- counts(dds_seq_ttenax, normalized = T)[rownames(sig_df_padj_cleaned), ]
+
+heatmap_counts_zscores <- t(apply(heatmap_counts, 1, scale))
+
+colnames(heatmap_counts_zscores) <- c("T-Tenax Treated-1", "T-Tenax Treated-2", "T-Tenax Treated-3", "Untreated-1", "Untreated-2", "Untreated-3")
+
+colors_heatmap <- colorRamp2(breaks = c(-2, 0, 2),
+                             colors = c("white", "blue", "black"))
+
+Heatmap(heatmap_counts_zscores, 
+        cluster_rows = T, cluster_columns = T, 
+        name = "z-score", 
+        row_labels = sig_df_padj_cleaned[rownames(heatmap_counts_zscores),]$symbol, 
+        row_names_gp = gpar(fontsize = 7, lwd = 3),
+        column_names_gp = gpar(fontsize = 9),
+        col = colors_heatmap,
+        border = TRUE)
+```
+
+##### Let's wrap it all up by making a volcano plot of the significnalty differentially expressed genes. We can find target genes by looking for genes with a low p-value and either a drastic upregualtion or downregulation.
+
+```{r}
+#Now we are going to make a volcano plot to display points representing genes and a threshold for a p-value, along with an x-axis to represent either upregulation or downregulation
+EnhancedVolcano(sigs.df,
+    lab = sigs.df$symbol,
+    x = 'log2FoldChange',
+    y = 'pvalue',
+    title = 'Volcano Plot of Significant Genes Associated with T. Tenax Treatment',
+    pCutoff = 10e-32,
+    FCcutoff = 0.5,
+    pointSize = 3.0,
+    labSize = 4.0)
+```
